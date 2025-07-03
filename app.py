@@ -69,8 +69,8 @@ def fetch_and_summarize(url):
                     if "no" in decision:
                         continue
                 except:
-                score += 5 if any(k in text_lower for k in fallback_keywords) else 0  # fallback score if GPT fails
-                pass
+                    score += 5 if any(k in text_lower for k in fallback_keywords) else 0  # fallback score if GPT fails
+                    pass
 
             ranked_links.append((text, link, score))
         ranked_links = sorted(ranked_links, key=lambda x: x[2], reverse=True)
@@ -221,6 +221,4 @@ if st.button("Summarize"):
 
             with st.expander("🔗 Show Links and Headings"):
                 st.write("**Headings:**", result['headings'])
-                st.write("**Links:**", result['links']),
-                file_name=f"summary_{i+1}_{j+1}.json"
-            )
+                st.write("**Links:**", result['links'])
