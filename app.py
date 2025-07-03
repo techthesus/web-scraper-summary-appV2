@@ -10,7 +10,7 @@ if "OPENAI_API_KEY" not in st.secrets:
     st.error("API key not set. Please configure OPENAI_API_KEY in Streamlit secrets.")
     st.stop()
 
-client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 VALID_SCHEMES = ["http", "https"]
 
@@ -61,8 +61,8 @@ Content:
 {combined}
 """
 
-        response = client.chat.completions.create(
-            model="gpt-4",
+        response = openai.chat.completions.create(
+            model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You summarize and categorize webpage content."},
                 {"role": "user", "content": prompt}
@@ -100,3 +100,4 @@ if st.button("Summarize"):
         st.text_area("Summary", ai_summary, height=400)
 
         st.download_button("📥 Download JSON", data=json.dumps(result, indent=4, ensure_ascii=False), file_name="summary.json")
+
