@@ -10,7 +10,7 @@ if "OPENAI_API_KEY" not in st.secrets:
     st.error("API key not set. Please configure OPENAI_API_KEY in Streamlit secrets.")
     st.stop()
 
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 VALID_SCHEMES = ["http", "https"]
 
@@ -61,7 +61,7 @@ Content:
 {combined}
 """
 
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4",
             messages=[
                 {"role": "system", "content": "You summarize and categorize webpage content."},
