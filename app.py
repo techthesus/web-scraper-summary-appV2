@@ -32,15 +32,6 @@ def clean_text_with_sup_sub(soup):
         tag.unwrap()
     return soup.get_text(strip=True, separator=' ')
 
-def score_link(link_text, url_path):
-    score = 0
-    score += len(link_text) * 0.5
-    score -= url_path.strip('/').count('/') * 2
-    keywords = ["insight", "ai", "future", "strategy", "tech", "digital"]
-    if any(k in link_text.lower() for k in keywords):
-        score += 10
-    return score
-
 show_link_scores = st.checkbox("Show link scores", value=False)
 
 def fetch_and_summarize(url):
@@ -51,16 +42,15 @@ def fetch_and_summarize(url):
         soup = BeautifulSoup(response.text, "html.parser")
 
         title = soup.title.string.strip() if soup.title and soup.title.string else "No title"
+        headings = [h.get_text(strip=True) for h in soup.find_all(['h1', 'h2'])]
         paragraphs = [clean_text_with_sup_sub(p) for p in soup.find_all('p')][:10]
-
         raw_links = [(a.get_text(strip=True), urljoin(url, a.get('href'))) for a in soup.find_all('a', href=True)]
         domain = urlparse(url).netloc
         internal_links = [(text, link) for text, link in raw_links if urlparse(link).netloc == domain or link.startswith('/')]
-        ranked_links = [(text, link, score_link(text, urlparse(link).path)) for text, link in internal_links]
+        ranked_links = [(text, link, len(text)*0.5 - urlparse(link).path.strip('/').count('/')*2 + (10 if any(k in text.lower() for k in ['insight','ai','tech','future','digital','strategy']) else 0)) for text, link in internal_links]
         ranked_links = sorted(ranked_links, key=lambda x: x[2], reverse=True)
-        top_links = [(text, link) if not show_link_scores else (f"{text} (Score: {score})", link) for text, link, score in ranked_links[:10]]
+        links = [(f"{text} (Score: {score})" if show_link_scores else text, link) for text, link, score in ranked_links[:10]]
 
-        headings = [h.get_text(strip=True) for h in soup.find_all(['h1', 'h2'])]
         html_content = soup.prettify()
 
         data = {
@@ -68,7 +58,7 @@ def fetch_and_summarize(url):
             "title": title,
             "headings": headings,
             "paragraphs": paragraphs,
-            "links": top_links,
+            "links": links,
             "html": html_content
         }
 
@@ -76,4 +66,128 @@ def fetch_and_summarize(url):
     except Exception as e:
         return {"error": str(e)}
 
-# The rest of your existing code remains unchanged...
+def crawl_internal_links(start_url, max_pages=3):
+    seen = set()
+    results = []
+    queue = deque([start_url])
+
+    while queue and len(seen) < max_pages:
+        current_url = queue.popleft()
+        if current_url in seen:
+            continue
+        seen.add(current_url)
+        result = fetch_and_summarize(current_url)
+        if "error" not in result:
+            results.append(result)
+            for _, link in result.get("links", []):
+                if is_valid_url(link) and link not in seen:
+                    queue.append(link)
+    return results
+
+def summarize_with_gpt(data, selected_model, depth, tone):
+    combined = "\n\n".join(data.get("paragraphs", []))
+    prompt = f"""
+You are an AI assistant. Summarize the following content into an executive overview, categorized bullet points, and detailed insights.
+Tone: {tone}
+Depth: {depth}
+Include:
+- Executive Summary
+- Key Ideas
+- Insights
+- Recommendations
+- Bullet format if appropriate
+- Separate sections by headings
+
+Content:
+{combined}
+"""
+
+    try:
+        if selected_model.startswith("gpt") and "OPENAI_API_KEY" in st.secrets:
+            response = openai.chat.completions.create(
+                model=selected_model,
+                messages=[
+                    {"role": "system", "content": "You summarize and structure webpage content."},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            return response.choices[0].message.content.strip(), "OpenAI: " + selected_model
+
+        elif selected_model.startswith("mixtral") and "TOGETHER_API_KEY" in st.secrets:
+            headers = {
+                "Authorization": f"Bearer {st.secrets['TOGETHER_API_KEY']}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
+                "messages": [
+                    {"role": "system", "content": "You summarize and structure webpage content."},
+                    {"role": "user", "content": prompt}
+                ]
+            }
+            res = requests.post("https://api.together.xyz/v1/chat/completions", headers=headers, json=payload, timeout=30)
+            res.raise_for_status()
+            return res.json()["choices"][0]["message"]["content"].strip(), "Together.ai: Mixtral"
+
+        elif selected_model.startswith("gemini") and "GEMINI_API_KEY" in st.secrets:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={st.secrets['GEMINI_API_KEY']}"
+            headers = {"Content-Type": "application/json"}
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}]
+            }
+            res = requests.post(url, headers=headers, json=payload)
+            res.raise_for_status()
+            return res.json()['candidates'][0]['content']['parts'][0]['text'].strip(), "Google: Gemini"
+
+    except Exception as e:
+        return f"Model error: {e}", selected_model
+
+    return "No available summarization model succeeded.", "None"
+
+st.set_page_config(page_title="Web Scraper Summary Tool", page_icon="🕷️")
+st.title("🕷️ Web Scraper Summary Tool")
+
+url = st.text_area("Enter one or more webpage URLs (one per line):", "https://www.mckinsey.com/capabilities/quantumblack/our-insights/seizing-the-agentic-ai-advantage")
+model_choice = st.selectbox("Choose AI Model", [
+    "gpt-3.5-turbo",
+    "gpt-3.5-turbo-1106",
+    "mixtral-8x7b",
+    "gemini-pro"
+])
+depth = st.selectbox("Summary Depth", ["short", "medium", "long"], index=1)
+tone = st.selectbox("Summary Tone", ["neutral", "professional", "friendly", "assertive"], index=0)
+max_pages = st.slider("Max internal pages to crawl (per site):", 1, 10, 3)
+
+if st.button("Summarize"):
+    urls = [line.strip() for line in url.splitlines() if is_valid_url(line)]
+    if not urls:
+        st.error("Please enter at least one valid URL starting with http:// or https://")
+        st.stop()
+
+    for i, u in enumerate(urls):
+        st.subheader(f"🔎 Crawling {u} (up to {max_pages} internal pages)")
+        crawled_results = crawl_internal_links(u, max_pages=max_pages)
+
+        for j, result in enumerate(crawled_results):
+            st.markdown(f"### 📄 Summary {j+1} - {result['url']}")
+            st.write(f"**Title:** {result['title']}")
+            st.write("**Headings:**", result['headings'])
+            st.write("**Links:**", result['links'])
+
+            with st.spinner("Generating summary using AI model..."):
+                ai_summary, used_model = summarize_with_gpt(result, model_choice, depth, tone)
+
+            st.markdown(f"**Model used:** {used_model}")
+            st.text_area("🧠 Summary", ai_summary, height=400)
+
+            result.update({
+                "summary": ai_summary,
+                "model_used": used_model,
+                "timestamp": datetime.datetime.now().isoformat()
+            })
+
+            st.download_button(
+                label="📥 Download Summary JSON",
+                data=json.dumps(result, indent=4, ensure_ascii=False),
+                file_name=f"summary_{i+1}_{j+1}.json"
+            )
