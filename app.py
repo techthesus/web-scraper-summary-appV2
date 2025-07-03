@@ -47,8 +47,35 @@ def fetch_and_summarize(url):
         raw_links = [(a.get_text(strip=True), urljoin(url, a.get('href'))) for a in soup.find_all('a', href=True)]
         domain = urlparse(url).netloc
         internal_links = [(text, link) for text, link in raw_links if urlparse(link).netloc == domain or link.startswith('/')]
-        ranked_links = [(text, link, len(text)*0.5 - urlparse(link).path.strip('/').count('/')*2 + (10 if any(k in text.lower() for k in ['insight','ai','tech','future','digital','strategy']) else 0)) for text, link in internal_links]
+        ranked_links = []
+        fallback_keywords = ['insight','ai','tech','future','digital','strategy']
+        for text, link in internal_links:
+            text_lower = text.lower()
+            score = len(text) * 0.5 - urlparse(link).path.strip('/').count('/') * 2
+            score += 10 if any(k in text_lower for k in ['insight','ai','tech','future','digital','strategy']) else 0
+
+            use_semantic_filtering = 'link_filter_prompt' in globals() and link_filter_prompt
+            if use_semantic_filtering:
+                try:
+                    llm_prompt = f"Filter this link: '{text}' with URL '{link}' based on this intent: '{link_filter_prompt}'. Reply 'yes' if relevant, 'no' if not."
+                    response = openai.chat.completions.create(
+                        model="gpt-3.5-turbo",
+                        messages=[
+                            {"role": "system", "content": "You evaluate relevance of webpage links."},
+                            {"role": "user", "content": llm_prompt}
+                        ]
+                    )
+                    decision = response.choices[0].message.content.strip().lower()
+                    if "no" in decision:
+                        continue
+                except:
+                score += 5 if any(k in text_lower for k in fallback_keywords) else 0  # fallback score if GPT fails
+                pass
+
+            ranked_links.append((text, link, score))
         ranked_links = sorted(ranked_links, key=lambda x: x[2], reverse=True)
+        if len(ranked_links) == 0:
+            ranked_links = [(text, link, len(text) * 0.5) for text, link in internal_links[:10]]  # fallback basic scoring
         links = [(f"{text} (Score: {score})" if show_link_scores else text, link) for text, link, score in ranked_links[:10]]
 
         html_content = soup.prettify()
@@ -171,8 +198,8 @@ if st.button("Summarize"):
         for j, result in enumerate(crawled_results):
             st.markdown(f"### 📄 Summary {j+1} - {result['url']}")
             st.write(f"**Title:** {result['title']}")
-            st.write("**Headings:**", result['headings'])
-            st.write("**Links:**", result['links'])
+            
+            
 
             with st.spinner("Generating summary using AI model..."):
                 ai_summary, used_model = summarize_with_gpt(result, model_choice, depth, tone)
@@ -189,5 +216,11 @@ if st.button("Summarize"):
             st.download_button(
                 label="📥 Download Summary JSON",
                 data=json.dumps(result, indent=4, ensure_ascii=False),
+                file_name=f"summary_{i+1}_{j+1}.json"
+            )
+
+            with st.expander("🔗 Show Links and Headings"):
+                st.write("**Headings:**", result['headings'])
+                st.write("**Links:**", result['links']),
                 file_name=f"summary_{i+1}_{j+1}.json"
             )
