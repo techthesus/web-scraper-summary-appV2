@@ -252,6 +252,36 @@ def search_web_for_keyword(query):
         except Exception as e:
             st.warning(f"Serper failed: {e}")
 
+    if GOOGLE_CSE_API_KEY and GOOGLE_CSE_ID:
+        try:
+            url = f"https://www.googleapis.com/customsearch/v1?key={GOOGLE_CSE_API_KEY}&cx={GOOGLE_CSE_ID}&q={query}"
+            res = requests.get(url)
+            res.raise_for_status()
+            urls = [item['link'] for item in res.json().get('items', [])]
+            if urls:
+                return urls
+        except Exception as e:
+            st.warning(f"Google CSE failed: {e}")
+
+    return urls
+        except Exception as e:
+            st.warning(f"Serper failed: {e}")
+
+    if GOOGLE_CSE_API_KEY and GOOGLE_CSE_ID:
+        try:
+            url = f"https://www.googleapis.com/customsearch/v1?key={GOOGLE_CSE_API_KEY}&cx={GOOGLE_CSE_ID}&q={query}"
+            res = requests.get(url)
+            res.raise_for_status()
+            urls = [item['link'] for item in res.json().get('items', [])]
+            if urls:
+                return urls
+        except Exception as e:
+            st.warning(f"Google CSE failed: {e}")
+
+    return urls
+        except Exception as e:
+            st.warning(f"Serper failed: {e}")
+
         if GOOGLE_CSE_API_KEY and GOOGLE_CSE_ID:
         try:
             url = f"https://www.googleapis.com/customsearch/v1?key={GOOGLE_CSE_API_KEY}&cx={GOOGLE_CSE_ID}&q={query}"
