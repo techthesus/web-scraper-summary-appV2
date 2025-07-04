@@ -218,6 +218,8 @@ def search_web_for_keyword(query):
             urls = [r["link"] for r in res.json().get("organic", [])]
             if urls:
                 return urls
+        except Exception as e:
+            st.warning(f"Serper failed: {e}")
 
         if GOOGLE_CSE_API_KEY and GOOGLE_CSE_ID:
         try:
@@ -227,6 +229,10 @@ def search_web_for_keyword(query):
             urls = [item['link'] for item in res.json().get('items', [])]
             if urls:
                 return urls
+        except Exception as e:
+            st.warning(f"Google CSE failed: {e}")
+
+    return urls
         except Exception as e:
             st.warning(f"Google CSE failed: {e}")
 
