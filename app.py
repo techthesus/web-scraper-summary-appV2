@@ -203,7 +203,6 @@ keyword_query = st.sidebar.text_input("Search query (Google-style)", "AI strateg
 use_keyword_crawl = st.sidebar.checkbox("Use keyword-based crawling", value=False)
 
 SERPER_API_KEY = st.secrets.get("SERPER_API_KEY", None)
-BING_API_KEY = st.secrets.get("BING_API_KEY", None)
 GOOGLE_CSE_API_KEY = st.secrets.get("GOOGLE_CSE_API_KEY", None)
 GOOGLE_CSE_ID = st.secrets.get("GOOGLE_CSE_ID", None)
 
@@ -220,19 +219,7 @@ def search_web_for_keyword(query):
             if urls:
                 return urls
 
-    if BING_API_KEY:
-        try:
-            url = f"https://api.bing.microsoft.com/v7.0/search?q={query}"
-            headers = {"Ocp-Apim-Subscription-Key": BING_API_KEY}
-            res = requests.get(url, headers=headers)
-            res.raise_for_status()
-            urls = [item['url'] for item in res.json().get('webPages', {}).get('value', [])]
-            if urls:
-                return urls
-        except Exception as e:
-            st.warning(f"Bing failed: {e}")
-
-    if GOOGLE_CSE_API_KEY and GOOGLE_CSE_ID:
+        if GOOGLE_CSE_API_KEY and GOOGLE_CSE_ID:
         try:
             url = f"https://www.googleapis.com/customsearch/v1?key={GOOGLE_CSE_API_KEY}&cx={GOOGLE_CSE_ID}&q={query}"
             res = requests.get(url)
@@ -247,19 +234,7 @@ def search_web_for_keyword(query):
         except Exception as e:
             st.warning(f"Serper failed: {e}")
 
-    if BING_API_KEY:
-        try:
-            url = f"https://api.bing.microsoft.com/v7.0/search?q={query}"
-            headers = {"Ocp-Apim-Subscription-Key": BING_API_KEY}
-            res = requests.get(url, headers=headers)
-            res.raise_for_status()
-            urls = [item['url'] for item in res.json().get('webPages', {}).get('value', [])]
-            if urls:
-                return urls
-        except Exception as e:
-            st.warning(f"Bing failed: {e}")
-
-    if GOOGLE_CSE_API_KEY and GOOGLE_CSE_ID:
+        if GOOGLE_CSE_API_KEY and GOOGLE_CSE_ID:
         try:
             url = f"https://www.googleapis.com/customsearch/v1?key={GOOGLE_CSE_API_KEY}&cx={GOOGLE_CSE_ID}&q={query}"
             res = requests.get(url)
