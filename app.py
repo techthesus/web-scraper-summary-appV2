@@ -5,6 +5,7 @@ import json
 import openai
 import re
 from urllib.parse import urlparse, urljoin
+import urllib.robotparser
 import datetime
 import textwrap
 from collections import deque
@@ -50,6 +51,7 @@ def fetch_and_summarize(url):
         ranked_links = []
         fallback_keywords = ['insight','ai','tech','future','digital','strategy']
         for text, link in internal_links:
+            filtered_by = "not_filtered"
             text_lower = text.lower()
             score = len(text) * 0.5 - urlparse(link).path.strip('/').count('/') * 2
             score += 10 if any(k in text_lower for k in ['insight','ai','tech','future','digital','strategy']) else 0
@@ -58,8 +60,9 @@ def fetch_and_summarize(url):
             if use_semantic_filtering:
                 try:
                     llm_prompt = f"Filter this link: '{text}' with URL '{link}' based on this intent: '{link_filter_prompt}'. Reply 'yes' if relevant, 'no' if not."
-                    response = openai.chat.completions.create(
-                        model="gpt-3.5-turbo",
+                    if model_choice.startswith("gpt") and "OPENAI_API_KEY" in st.secrets:
+                        response = openai.chat.completions.create(
+                            model=model_choice,
                         messages=[
                             {"role": "system", "content": "You evaluate relevance of webpage links."},
                             {"role": "user", "content": llm_prompt}
@@ -67,16 +70,23 @@ def fetch_and_summarize(url):
                     )
                     decision = response.choices[0].message.content.strip().lower()
                     if "no" in decision:
+                        filtered_by = model_choice
+                        st.info(f"✅ Allowed by {model_choice}: {text}")
+                        continue
+                    else:
+                        filtered_by = model_choice
                         continue
                 except:
+                    filtered_by = "fallback"
+                    st.warning(f"⚠️ Fallback used for: {text}")
                     score += 5 if any(k in text_lower for k in fallback_keywords) else 0  # fallback score if GPT fails
                     pass
 
-            ranked_links.append((text, link, score))
+            ranked_links.append((text, link, score, filtered_by))
         ranked_links = sorted(ranked_links, key=lambda x: x[2], reverse=True)
         if len(ranked_links) == 0:
             ranked_links = [(text, link, len(text) * 0.5) for text, link in internal_links[:10]]  # fallback basic scoring
-        links = [(f"{text} (Score: {score})" if show_link_scores else text, link) for text, link, score in ranked_links[:10]]
+        links = [(f"{text} (Score: {score}, Filtered by: {filtered_by})" if show_link_scores else text, link) for text, link, score, filtered_by in ranked_links[:10]]
 
         html_content = soup.prettify()
 
@@ -93,7 +103,18 @@ def fetch_and_summarize(url):
     except Exception as e:
         return {"error": str(e)}
 
-def crawl_internal_links(start_url, max_pages=3):
+def is_allowed_by_robots(url, user_agent):
+    try:
+        parsed = urlparse(url)
+        robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
+        rp = urllib.robotparser.RobotFileParser()
+        rp.set_url(robots_url)
+        rp.read()
+        return rp.can_fetch(user_agent, url)
+    except:
+        return False
+
+def crawl_internal_links(start_url, max_pages=3, user_agent="WebScraperBot"):
     seen = set()
     results = []
     queue = deque([start_url])
@@ -107,8 +128,11 @@ def crawl_internal_links(start_url, max_pages=3):
         if "error" not in result:
             results.append(result)
             for _, link in result.get("links", []):
-                if is_valid_url(link) and link not in seen:
+                if is_valid_url(link) and link not in seen and is_allowed_by_robots(link, user_agent):
                     queue.append(link)
+                elif show_blocked_links:
+                    st.warning(f"Blocked by robots.txt: {link}")
+                continue
     return results
 
 def summarize_with_gpt(data, selected_model, depth, tone):
@@ -174,6 +198,62 @@ Content:
 st.set_page_config(page_title="Web Scraper Summary Tool", page_icon="🕷️")
 st.title("🕷️ Web Scraper Summary Tool")
 
+st.sidebar.subheader("🌐 Keyword Web Crawler")
+keyword_query = st.sidebar.text_input("Search query (Google-style)", "AI strategy site:mckinsey.com")
+use_keyword_crawl = st.sidebar.checkbox("Use keyword-based crawling", value=False)
+
+SERPER_API_KEY = st.secrets.get("SERPER_API_KEY", None)
+BING_API_KEY = st.secrets.get("BING_API_KEY", None)
+GOOGLE_CSE_API_KEY = st.secrets.get("GOOGLE_CSE_API_KEY", None)
+GOOGLE_CSE_ID = st.secrets.get("GOOGLE_CSE_ID", None)
+
+def search_web_for_keyword(query):
+    urls = []
+    if SERPER_API_KEY:
+        try:
+            url = "https://api.serper.dev/search"
+            headers = {"X-API-KEY": SERPER_API_KEY}
+            payload = {"q": query, "gl": "us"}
+            res = requests.post(url, json=payload, headers=headers)
+            res.raise_for_status()
+            urls = [r["link"] for r in res.json().get("organic", [])]
+            if urls:
+                return urls
+        except Exception as e:
+            st.warning(f"Serper failed: {e}")
+
+    if BING_API_KEY:
+        try:
+            url = f"https://api.bing.microsoft.com/v7.0/search?q={query}"
+            headers = {"Ocp-Apim-Subscription-Key": BING_API_KEY}
+            res = requests.get(url, headers=headers)
+            res.raise_for_status()
+            urls = [item['url'] for item in res.json().get('webPages', {}).get('value', [])]
+            if urls:
+                return urls
+        except Exception as e:
+            st.warning(f"Bing failed: {e}")
+
+    if GOOGLE_CSE_API_KEY and GOOGLE_CSE_ID:
+        try:
+            url = f"https://www.googleapis.com/customsearch/v1?key={GOOGLE_CSE_API_KEY}&cx={GOOGLE_CSE_ID}&q={query}"
+            res = requests.get(url)
+            res.raise_for_status()
+            urls = [item['link'] for item in res.json().get('items', [])]
+            if urls:
+                return urls
+        except Exception as e:
+            st.warning(f"Google CSE failed: {e}")
+
+    return urls
+    except Exception as e:
+        st.error(f"Keyword search failed: {e}")
+        return []
+
+st.sidebar.subheader("🛡️ Crawler Settings")
+user_agent = st.sidebar.text_input("User-Agent string (for robots.txt)", "WebScraperBot")
+show_blocked_links = st.sidebar.checkbox("Log links blocked by robots.txt", value=False)
+
 url = st.text_area("Enter one or more webpage URLs (one per line):", "https://www.mckinsey.com/capabilities/quantumblack/our-insights/seizing-the-agentic-ai-advantage")
 model_choice = st.selectbox("Choose AI Model", [
     "gpt-3.5-turbo",
@@ -186,14 +266,19 @@ tone = st.selectbox("Summary Tone", ["neutral", "professional", "friendly", "ass
 max_pages = st.slider("Max internal pages to crawl (per site):", 1, 10, 3)
 
 if st.button("Summarize"):
-    urls = [line.strip() for line in url.splitlines() if is_valid_url(line)]
+    if use_keyword_crawl:
+        urls = search_web_for_keyword(keyword_query)
+    else:
+        urls = [line.strip() for line in url.splitlines() if is_valid_url(line)]
     if not urls:
         st.error("Please enter at least one valid URL starting with http:// or https://")
         st.stop()
 
     for i, u in enumerate(urls):
         st.subheader(f"🔎 Crawling {u} (up to {max_pages} internal pages)")
-        crawled_results = crawl_internal_links(u, max_pages=max_pages)
+        crawled_results = crawl_internal_links(u, max_pages=max_pages, user_agent=user_agent)
+        st.markdown(f"✅ Crawled: {len(crawled_results)} page(s)")
+        st.markdown(f"📌 Filter model: `{model_choice}`")
 
         for j, result in enumerate(crawled_results):
             st.markdown(f"### 📄 Summary {j+1} - {result['url']}")
