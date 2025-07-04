@@ -209,29 +209,86 @@ def search_web_for_keyword(query):
     # Try Serper API first
     if SERPER_API_KEY:
         try:
-            url = "https://api.serper.dev/search"
-            headers = {"X-API-KEY": SERPER_API_KEY}
-            payload = {"q": query, "gl": "us"}
-            res = requests.post(url, json=payload, headers=headers)
-            res.raise_for_status()
-            urls = [r["link"] for r in res.json().get("organic", [])]
-            if urls:
-                return urls
+            headers = {
+                "X-API-KEY": SERPER_API_KEY,
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "q": query,
+                "gl": "us",
+                "hl": "en",
+                "num": 10
+            }
+            res = requests.post("https://google.serper.dev/search", json=payload, headers=headers, timeout=10)
+            
+            if res.status_code == 200:
+                data = res.json()
+                urls = [r["link"] for r in data.get("organic", [])]
+                if urls:
+                    st.success(f"✅ Serper API found {len(urls)} URLs")
+                    return urls
+            elif res.status_code == 404:
+                st.error("❌ Serper API endpoint not found. Please check your API configuration.")
+            elif res.status_code == 401:
+                st.error("❌ Invalid Serper API key. Please check your API key in secrets.")
+            elif res.status_code == 429:
+                st.error("❌ Serper API rate limit exceeded. Please try again later.")
+            else:
+                st.error(f"❌ Serper API error: {res.status_code} - {res.text}")
+                
+        except requests.exceptions.Timeout:
+            st.warning("⏱️ Serper API request timed out")
+        except requests.exceptions.ConnectionError:
+            st.warning("🔌 Unable to connect to Serper API")
         except Exception as e:
-            st.warning(f"Serper API failed: {e}")
+            st.warning(f"⚠️ Serper API error: {str(e)}")
 
     # Try Google Custom Search API as fallback
     if GOOGLE_CSE_API_KEY and GOOGLE_CSE_ID:
         try:
-            url = f"https://www.googleapis.com/customsearch/v1?key={GOOGLE_CSE_API_KEY}&cx={GOOGLE_CSE_ID}&q={query}"
-            res = requests.get(url)
-            res.raise_for_status()
-            urls = [item['link'] for item in res.json().get('items', [])]
-            if urls:
-                return urls
+            params = {
+                "key": GOOGLE_CSE_API_KEY,
+                "cx": GOOGLE_CSE_ID,
+                "q": query,
+                "num": 10
+            }
+            res = requests.get("https://www.googleapis.com/customsearch/v1", params=params, timeout=10)
+            
+            if res.status_code == 200:
+                data = res.json()
+                urls = [item['link'] for item in data.get('items', [])]
+                if urls:
+                    st.success(f"✅ Google CSE found {len(urls)} URLs")
+                    return urls
+            elif res.status_code == 403:
+                error_details = res.json().get('error', {})
+                error_message = error_details.get('message', 'Unknown error')
+                if 'Daily Limit Exceeded' in error_message:
+                    st.error("❌ Google CSE daily quota exceeded. Please try again tomorrow.")
+                elif 'API key not valid' in error_message:
+                    st.error("❌ Invalid Google CSE API key. Please check your API key in secrets.")
+                else:
+                    st.error(f"❌ Google CSE access denied: {error_message}")
+            elif res.status_code == 400:
+                st.error("❌ Invalid Google CSE request. Please check your search query and CSE ID.")
+            else:
+                st.error(f"❌ Google CSE error: {res.status_code} - {res.text}")
+                
+        except requests.exceptions.Timeout:
+            st.warning("⏱️ Google CSE request timed out")
+        except requests.exceptions.ConnectionError:
+            st.warning("🔌 Unable to connect to Google CSE API")
         except Exception as e:
-            st.warning(f"Google CSE failed: {e}")
+            st.warning(f"⚠️ Google CSE error: {str(e)}")
 
+    # If no APIs worked, provide helpful guidance
+    if not urls:
+        st.error("❌ No search results found. Please check:")
+        st.write("1. **API Keys**: Ensure your SERPER_API_KEY or GOOGLE_CSE_API_KEY are correctly set in Streamlit secrets")
+        st.write("2. **Serper API**: Sign up at https://serper.dev for free API access")
+        st.write("3. **Google CSE**: Set up Custom Search Engine at https://programmablesearchengine.google.com/")
+        st.write("4. **Search Query**: Try a simpler search query")
+        
     return urls
 
 # Streamlit UI
@@ -242,6 +299,29 @@ st.title("🕷️ Web Scraper Summary Tool")
 st.sidebar.subheader("🌐 Keyword Web Crawler")
 keyword_query = st.sidebar.text_input("Search query (Google-style)", "AI strategy site:mckinsey.com")
 use_keyword_crawl = st.sidebar.checkbox("Use keyword-based crawling", value=False)
+
+# API Configuration Help
+if use_keyword_crawl:
+    st.sidebar.info("📝 **API Setup Required:**")
+    SERPER_API_KEY = st.secrets.get("SERPER_API_KEY", None)
+    GOOGLE_CSE_API_KEY = st.secrets.get("GOOGLE_CSE_API_KEY", None)
+    GOOGLE_CSE_ID = st.secrets.get("GOOGLE_CSE_ID", None)
+    
+    if not SERPER_API_KEY and not (GOOGLE_CSE_API_KEY and GOOGLE_CSE_ID):
+        st.sidebar.error("❌ No search API configured!")
+        st.sidebar.write("**Option 1 - Serper API (Recommended):**")
+        st.sidebar.write("1. Sign up at https://serper.dev")
+        st.sidebar.write("2. Get free API key (2,500 queries/month)")
+        st.sidebar.write("3. Add `SERPER_API_KEY` to Streamlit secrets")
+        st.sidebar.write("**Option 2 - Google Custom Search:**")
+        st.sidebar.write("1. Create CSE at https://programmablesearchengine.google.com/")
+        st.sidebar.write("2. Get API key from Google Cloud Console")
+        st.sidebar.write("3. Add `GOOGLE_CSE_API_KEY` and `GOOGLE_CSE_ID` to secrets")
+    else:
+        if SERPER_API_KEY:
+            st.sidebar.success("✅ Serper API configured")
+        if GOOGLE_CSE_API_KEY and GOOGLE_CSE_ID:
+            st.sidebar.success("✅ Google CSE configured")
 
 st.sidebar.subheader("🛡️ Crawler Settings")
 user_agent = st.sidebar.text_input("User-Agent string (for robots.txt)", "WebScraperBot")
@@ -271,9 +351,23 @@ max_pages = st.slider("Max internal pages to crawl (per site):", 1, 10, 3)
 # Main execution
 if st.button("Summarize"):
     if use_keyword_crawl:
+        # Check if search APIs are available
+        SERPER_API_KEY = st.secrets.get("SERPER_API_KEY", None)
+        GOOGLE_CSE_API_KEY = st.secrets.get("GOOGLE_CSE_API_KEY", None)
+        GOOGLE_CSE_ID = st.secrets.get("GOOGLE_CSE_ID", None)
+        
+        if not SERPER_API_KEY and not (GOOGLE_CSE_API_KEY and GOOGLE_CSE_ID):
+            st.error("❌ No search API configured. Please set up either Serper API or Google Custom Search Engine.")
+            st.stop()
+            
+        st.info(f"🔍 Searching for: '{keyword_query}'")
         urls = search_web_for_keyword(keyword_query)
+        
         if not urls:
-            st.error("No URLs found for the given search query. Please check your search terms or API configuration.")
+            st.error("❌ No URLs found for the given search query. Please try:")
+            st.write("- Using different search terms")
+            st.write("- Checking your API key configuration")
+            st.write("- Trying manual URL input instead")
             st.stop()
     else:
         urls = [line.strip() for line in url.splitlines() if line.strip() and is_valid_url(line.strip())]
