@@ -219,6 +219,31 @@ def search_web_for_keyword(query):
             urls = [r["link"] for r in res.json().get("organic", [])]
             if urls:
                 return urls
+
+    if BING_API_KEY:
+        try:
+            url = f"https://api.bing.microsoft.com/v7.0/search?q={query}"
+            headers = {"Ocp-Apim-Subscription-Key": BING_API_KEY}
+            res = requests.get(url, headers=headers)
+            res.raise_for_status()
+            urls = [item['url'] for item in res.json().get('webPages', {}).get('value', [])]
+            if urls:
+                return urls
+        except Exception as e:
+            st.warning(f"Bing failed: {e}")
+
+    if GOOGLE_CSE_API_KEY and GOOGLE_CSE_ID:
+        try:
+            url = f"https://www.googleapis.com/customsearch/v1?key={GOOGLE_CSE_API_KEY}&cx={GOOGLE_CSE_ID}&q={query}"
+            res = requests.get(url)
+            res.raise_for_status()
+            urls = [item['link'] for item in res.json().get('items', [])]
+            if urls:
+                return urls
+        except Exception as e:
+            st.warning(f"Google CSE failed: {e}")
+
+    return urls
         except Exception as e:
             st.warning(f"Serper failed: {e}")
 
@@ -246,9 +271,6 @@ def search_web_for_keyword(query):
             st.warning(f"Google CSE failed: {e}")
 
     return urls
-    except Exception as e:
-        st.error(f"Keyword search failed: {e}")
-        return []
 
 st.sidebar.subheader("🛡️ Crawler Settings")
 user_agent = st.sidebar.text_input("User-Agent string (for robots.txt)", "WebScraperBot")
